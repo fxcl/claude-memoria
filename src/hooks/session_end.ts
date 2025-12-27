@@ -1,0 +1,66 @@
+import * as fs from 'fs';
+import {
+  loadPlaybook,
+  savePlaybook,
+  loadTranscript,
+  extractKeypoints,
+  updatePlaybookData,
+  clearSession,
+  loadSettings,
+} from './common.js';
+
+async function main() {
+  const stdinBuffer = fs.readFileSync(0, 'utf-8');
+  if (!stdinBuffer) {
+      process.exit(0);
+  }
+  
+  let inputData;
+  try {
+      inputData = JSON.parse(stdinBuffer);
+  } catch (e) {
+      // If parsing fails for some reason (empty input)
+      process.exit(0);
+  }
+
+  const transcriptPath = inputData.transcript_path;
+  const messages = loadTranscript(transcriptPath);
+
+  if (!messages || messages.length === 0) {
+    process.exit(0);
+  }
+
+  const settings = loadSettings();
+  const updateOnExit = settings.playbook_update_on_exit || false;
+  const updateOnClear = settings.playbook_update_on_clear || false;
+
+  const reason = inputData.reason || '';
+
+  // Skip playbook update for /exit command when setting is disabled
+  if (!updateOnExit && reason === 'prompt_input_exit') {
+    process.exit(0);
+  }
+
+  // Skip playbook update for /clear command when setting is disabled
+  if (!updateOnClear && reason === 'clear') {
+    process.exit(0);
+  }
+
+  let playbook = loadPlaybook();
+  const extractionResult = await extractKeypoints(
+    messages,
+    playbook,
+    'session_end_reflection'
+  );
+
+  playbook = updatePlaybookData(playbook, extractionResult);
+  savePlaybook(playbook);
+
+  clearSession();
+}
+
+main().catch((error) => {
+  console.error(`Error: ${error}`);
+  console.error(error.stack);
+  process.exit(1);
+});

@@ -1,0 +1,30 @@
+{
+  "name": "claude-memoria",
+  "version": "1.0.0",
+  "description": "Agentic Context Engineering - Automatic learning and knowledge accumulation system for Claude Code that extracts key points from conversations and injects them into future sessions.",
+  "main": "install.js",
+  "scripts": {
+    "postinstall": "node install.js",
+    "build": "esbuild src/hooks/session_end.ts src/hooks/precompact.ts src/hooks/user_prompt_inject.ts src/hooks/common.ts --bundle --platform=node --target=node16 --outdir=dist/hooks"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.33.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.27.2",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "claude-code",
+    "hooks",
+    "agentic",
+    "context-engineering"
+  ],
+  "author": "fxcl",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fxcl/claude-memoria.git"
+  }
+}

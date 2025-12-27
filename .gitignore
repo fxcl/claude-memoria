@@ -1,0 +1,11 @@
+# Generated files in .claude directory (auto-created by hooks at runtime)
+.claude/playbook.json
+.claude/last_session.txt
+.claude/diagnostic/
+.history/*
+.kilocode/*
+.roo/*
+.vscode/*
+.dist/*
+.logs/*
+node_modules/*

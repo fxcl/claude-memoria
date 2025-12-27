@@ -1,0 +1,39 @@
+{
+  "playbook_update_on_exit": true,
+  "playbook_update_on_clear": true,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{HOOK_COMMAND_USER_PROMPT_INJECT}}",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{HOOK_COMMAND_SESSION_END}}",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{HOOK_COMMAND_PRECOMPACT}}",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

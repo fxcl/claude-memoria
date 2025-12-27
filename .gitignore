@@ -9,4 +9,4 @@
 dist/*
 logs/*
 node_modules/*
-dist/*
+dist/*.beads/artifacts/

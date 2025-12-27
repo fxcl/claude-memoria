@@ -275,10 +275,10 @@ export async function extractKeypoints(
   diagnosticName: string = 'reflection'
 ): Promise<ExtractionResult> {
   // Check for Anthropic API key/setup
-  const apiKey = process.env['AGENTIC_CONTEXT_API_KEY'] || 
-                 process.env['ANTHROPIC_AUTH_TOKEN'] || 
+  const apiKey = process.env['AGENTIC_CONTEXT_API_KEY'] ||
+                 process.env['ANTHROPIC_AUTH_TOKEN'] ||
                  process.env['ANTHROPIC_API_KEY'];
-  
+
   if (!apiKey) {
     if (isDiagnosticMode()) {
       saveDiagnostic('Missing API Key (AGENTIC_CONTEXT_API_KEY, ANTHROPIC_AUTH_TOKEN, or ANTHROPIC_API_KEY). Extraction skipped.', `${diagnosticName}_error`);
@@ -286,15 +286,22 @@ export async function extractKeypoints(
     return { new_key_points: [], evaluations: [] };
   }
 
-  const model = process.env['AGENTIC_CONTEXT_MODEL'] || 
-                process.env['ANTHROPIC_MODEL'] || 
-                process.env['ANTHROPIC_DEFAULT_SONNET_MODEL'] || 
+  const model = process.env['AGENTIC_CONTEXT_MODEL'] ||
+                process.env['ANTHROPIC_MODEL'] ||
+                process.env['ANTHROPIC_DEFAULT_SONNET_MODEL'] ||
                 'claude-sonnet-4-5-20250929';
-  
+
   const baseUrl = process.env['AGENTIC_CONTEXT_BASE_URL'] || process.env['ANTHROPIC_BASE_URL'];
 
+  // Extended Thinking budget (default: 16000 tokens, set to 0 to disable)
+  const thinkingBudget = parseInt(process.env['AGENTIC_CONTEXT_THINKING_BUDGET'] || '16000', 10);
+
+  // Multi-round reflection (default: 1 for backward compatibility)
+  const maxRounds = parseInt(process.env['AGENTIC_CONTEXT_MAX_ROUNDS'] || '1', 10);
+  const minRounds = Math.max(1, maxRounds);
+
   const template = loadTemplate('reflection.txt');
-  
+
   const playbookDict: Record<string, string> = {};
   if (playbook.key_points) {
     playbook.key_points.forEach(kp => {
@@ -302,48 +309,52 @@ export async function extractKeypoints(
     });
   }
 
-  // Rudimentary replacement for Python's format. 
-  // Since template likely contains {trajectories} and {playbook}, we restart replace logic
-  // Be careful if template format is strictly Python-style ({key}). JS uses variable names but here we must string replace.
-  let prompt = template;
-  // NOTE: This assumes the template specifically uses {trajectories} and {playbook} which simple .replace handles if they appear once.
-  // If they appear multiple times, need .replace with global regex or replaceAll.
-  // Also, Python's .format() handles generic {}, need to be careful.
-  // But standard prompts usually just have these two placeholders.
-  
-  prompt = prompt.split('{trajectories}').join(JSON.stringify(messages, null, 2));
-  prompt = prompt.split('{playbook}').join(JSON.stringify(playbookDict, null, 2));
+  // Prompt caching: enable by default, disable with "false" string
+  const useCache = process.env['AGENTIC_CONTEXT_USE_CACHE'] !== 'false';
 
-  try {
-    const client = new Anthropic({
-      apiKey: apiKey,
-      baseURL: baseUrl, // SDK uses baseURL not base_url
-    });
-
-    const response = await client.messages.create({
+  // Helper: Build API parameters with optional features
+  function buildApiParams(prompt: string, includePlaybookInSystem: boolean): any {
+    const apiParams: any = {
       model: model,
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
-    });
+    };
 
-    const responseTextParts = response.content
-      .filter(block => block.type === 'text')
-      .map(block => (block as any).text);
-    
-    const responseText = responseTextParts.join('');
-
-    if (isDiagnosticMode()) {
-      saveDiagnostic(
-        `# PROMPT\n${prompt}\n\n${'='.repeat(80)}\n\n# RESPONSE\n${responseText}\n`,
-        diagnosticName
-      );
+    // Add system messages with caching when enabled
+    if (includePlaybookInSystem && useCache) {
+      const playbookText = JSON.stringify(playbookDict, null, 2);
+      apiParams.system = [{
+        type: 'text',
+        text: `# Current Playbook\n${playbookText}\n\nAnalyze the following reasoning trajectories in context of this playbook.`,
+        cache_control: { type: 'ephemeral' }
+      }];
     }
+
+    // Add extended thinking if budget > 0
+    if (thinkingBudget > 0) {
+      apiParams.thinking = {
+        type: 'enabled',
+        budget_tokens: thinkingBudget,
+      };
+    }
+
+    return apiParams;
+  }
+
+  // Helper: Parse reflection response
+  function parseReflectionResponse(response: any): any {
+    const responseTextParts = response.content
+      .filter((block: any) => block.type === 'text')
+      .map((block: any) => block.text);
+
+    const responseText = responseTextParts.join('');
 
     if (!responseText) {
       return { new_key_points: [], evaluations: [] };
     }
 
     let jsonText = responseText.trim();
+    // Extract JSON from code blocks
     if (jsonText.includes('```json')) {
       const start = jsonText.indexOf('```json') + 7;
       const end = jsonText.indexOf('```', start);
@@ -351,24 +362,106 @@ export async function extractKeypoints(
         jsonText = jsonText.substring(start, end).trim();
       }
     } else if (jsonText.includes('```')) {
-        const start = jsonText.indexOf('```') + 3;
-        const end = jsonText.indexOf('```', start);
-        if (end !== -1) {
-          jsonText = jsonText.substring(start, end).trim();
-        }
+      const start = jsonText.indexOf('```') + 3;
+      const end = jsonText.indexOf('```', start);
+      if (end !== -1) {
+        jsonText = jsonText.substring(start, end).trim();
+      }
     }
 
     try {
-      const result = JSON.parse(jsonText);
-      return {
-        new_key_points: result.new_key_points || [],
-        evaluations: result.evaluations || [],
-      };
+      return JSON.parse(jsonText);
     } catch (e) {
       return { new_key_points: [], evaluations: [] };
     }
-
-  } catch (e) {
-    return { new_key_points: [], evaluations: [] };
   }
+
+  // Multi-round reflection loop
+  let previousInsights: string[] = [];
+  let finalResult: ExtractionResult = { new_key_points: [], evaluations: [] };
+
+  for (let round = 0; round < minRounds; round++) {
+    // Build round-specific prompt
+    let roundPrompt = template;
+
+    // Handle template placeholders
+    if (useCache) {
+      // Remove {playbook} placeholder (handled in system message)
+      roundPrompt = roundPrompt.split('{playbook}').join('');
+    } else {
+      // Include playbook in prompt when not caching
+      roundPrompt = roundPrompt.split('{playbook}').join(JSON.stringify(playbookDict, null, 2));
+    }
+
+    // Replace trajectories placeholder
+    roundPrompt = roundPrompt.split('{trajectories}').join(JSON.stringify(messages, null, 2));
+
+    // Add previous round insights if not first round
+    if (round > 0 && previousInsights.length > 0) {
+      roundPrompt += `\n\n# Previous Round Insights\n${previousInsights.join('\n')}\n\nBased on the previous insights, refine your analysis. Look for:\n- Deeper causal relationships\n- Patterns you may have missed\n- Contradictions in your earlier analysis\n`;
+    }
+
+    try {
+      const client = new Anthropic({
+        apiKey: apiKey,
+        baseURL: baseUrl, // SDK uses baseURL not base_url
+      });
+
+      // Build API parameters (playbook in system only for first round or when caching)
+      const includePlaybookInSystem = (round === 0) || useCache;
+      const apiParams = buildApiParams(roundPrompt, includePlaybookInSystem);
+
+      const response = await client.messages.create(apiParams);
+
+      // Parse response
+      const result = parseReflectionResponse(response);
+
+      // Check for convergence
+      const converged = result.found_root_cause ||
+                        result.no_new_insights ||
+                        (round > 0 && result.insights_depth === 'sufficient');
+
+      // Accumulate insights
+      if (result.insights) {
+        previousInsights.push(...result.insights);
+      }
+
+      // Update final result (last round takes precedence for structured output)
+      finalResult = {
+        new_key_points: result.new_key_points || finalResult.new_key_points,
+        evaluations: result.evaluations || finalResult.evaluations,
+      };
+
+      // Diagnostic output
+      if (isDiagnosticMode()) {
+        let diagnosticContent = `# ROUND ${round + 1}/${minRounds}\n`;
+        if (useCache && includePlaybookInSystem) {
+          diagnosticContent += `(Playbook cached in system message)\n`;
+        }
+        diagnosticContent += `# USER PROMPT\n${roundPrompt}\n\n${'='.repeat(80)}\n\n# RESPONSE\n${JSON.stringify(result, null, 2)}\n`;
+        saveDiagnostic(diagnosticContent, diagnosticName);
+      }
+
+      // Stop if converged
+      if (converged && round > 0) {
+        if (isDiagnosticMode()) {
+          saveDiagnostic(`Converged at round ${round + 1}`, `${diagnosticName}_convergence`);
+        }
+        break;
+      }
+
+    } catch (e) {
+      // On error, log and continue with next round or return what we have
+      if (isDiagnosticMode()) {
+        saveDiagnostic(`Error in round ${round + 1}: ${e}`, `${diagnosticName}_error`);
+      }
+      // If first round fails, return empty; otherwise continue with accumulated results
+      if (round === 0) {
+        return { new_key_points: [], evaluations: [] };
+      }
+      break;
+    }
+  }
+
+  return finalResult;
 }

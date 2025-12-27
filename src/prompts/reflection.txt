@@ -4,9 +4,6 @@ Extract key points from reasoning trajectories and evaluate existing playbook ke
 # Reasoning Trajectories
 {trajectories}
 
-# Current Playbook
-{playbook}
-
 # Instructions
 1. Key points should have reference value for the future, such as:
    - Failed approaches to avoid
@@ -29,5 +26,10 @@ Extract key points from reasoning trajectories and evaluate existing playbook ke
   "evaluations": [
     {{"name": "kpt_001", "rating": "helpful"}},
     {{"name": "kpt_002", "rating": "neutral"}}
-  ]
+  ],
+  "insights": ["Key insight about causal relationships", "Pattern observed"],
+  "found_root_cause": false,
+  "no_new_insights": false,
+  "insights_depth": "initial"
 }}
+

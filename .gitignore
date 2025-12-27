@@ -6,6 +6,7 @@
 .kilocode/*
 .roo/*
 .vscode/*
-.dist/*
-.logs/*
+dist/*
+logs/*
 node_modules/*
+dist/*

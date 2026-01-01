@@ -22,8 +22,8 @@ A simplified implementation of Agentic Context Engineering (ACE) for Claude Code
 1. Clone and install:
 
 ```bash
-git clone https://github.com/fxcl/agentic_context_engineering.git
-cd agentic_context_engineering
+git clone https://github.com/fxcl/claude-memoria.git
+cd claude-memoria
 ```
 
 1. Install dependencies and build:

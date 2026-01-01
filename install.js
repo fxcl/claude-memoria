@@ -160,11 +160,20 @@ function install() {
   log('\n=== Claude Memoria Installation ===\n', 'blue');
 
   try {
-    // Step 1: Check directories
+    // Step 1: Check directories, build if needed
     const distDir = path.join(__dirname, 'dist');
     if (!fs.existsSync(distDir)) {
-      log('❌ Dist directory not found! Run "npm run build" first.', 'red');
-      process.exit(1);
+      log('ℹ Dist directory not found. Building...', 'blue');
+      try {
+        require('child_process').execSync('npx esbuild src/hooks/session_end.ts src/hooks/precompact.ts src/hooks/user_prompt_inject.ts src/hooks/common.ts --bundle --platform=node --target=node16 --outdir=dist/hooks', {
+          cwd: __dirname,
+          stdio: 'inherit'
+        });
+        log('✓ Build complete', 'green');
+      } catch (buildError) {
+        log('❌ Build failed. Please run "npm run build" manually.', 'red');
+        process.exit(1);
+      }
     }
     
     // Step 2: Copy hooks (from dist) and prompts (from src)

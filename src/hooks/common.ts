@@ -193,7 +193,7 @@ export function updatePlaybookData(playbook: Playbook, extractionResult: Extract
     }
   }
 
-  const ratingDelta: Record<string, number> = { 'helpful': 1, 'harmful': -3, 'neutral': -1 };
+  const ratingDelta: Record<string, number> = { 'helpful': 1, 'harmful': -1, 'neutral': -1 };
   const nameToKp = new Map(playbook.key_points.map(kp => [kp.name, kp]));
 
   for (const evalItem of evaluations) {
@@ -214,22 +214,39 @@ export function updatePlaybookData(playbook: Playbook, extractionResult: Extract
 export function loadTranscript(transcriptPath: string): any[] {
   const conversations: any[] = [];
 
+  if (!transcriptPath || typeof transcriptPath !== 'string') {
+    return conversations;
+  }
+
   try {
+    if (!fs.existsSync(transcriptPath)) {
+      return conversations;
+    }
+
     const fileContent = fs.readFileSync(transcriptPath, 'utf-8');
     const lines = fileContent.split('\n');
 
+    const maxMessages = parseInt(process.env['AGENTIC_CONTEXT_MAX_MESSAGES'] || '100', 10);
+    let count = 0;
+
     for (const line of lines) {
+      if (count >= maxMessages) {
+        break;
+      }
       if (!line.trim()) continue;
 
       try {
         const entry = JSON.parse(line);
 
+        if (!entry || typeof entry !== 'object') continue;
         if (entry.type !== 'user' && entry.type !== 'assistant') continue;
         if (entry.isMeta || entry.isVisibleInTranscriptOnly) continue;
 
-        const message = entry.message || {};
+        const message = entry.message;
+        if (!message || typeof message !== 'object') continue;
+
         const role = message.role;
-        const content = message.content || '';
+        const content = message.content;
 
         if (!role || !content) continue;
 
@@ -238,15 +255,20 @@ export function loadTranscript(transcriptPath: string): any[] {
         }
 
         if (Array.isArray(content)) {
-          const textParts = content
-            .filter((item: any) => typeof item === 'object' && item.type === 'text')
-            .map((item: any) => item.text || '');
-          
+          const textParts: string[] = [];
+          for (const item of content) {
+            if (item && typeof item === 'object' && item.type === 'text' && typeof item.text === 'string') {
+              textParts.push(item.text);
+            }
+          }
+
           if (textParts.length > 0) {
             conversations.push({ role, content: textParts.join('\n') });
+            count++;
           }
-        } else {
+        } else if (typeof content === 'string') {
           conversations.push({ role, content });
+          count++;
         }
 
       } catch (e) {

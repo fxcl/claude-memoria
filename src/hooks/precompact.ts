@@ -9,23 +9,41 @@ import {
 } from './common.js';
 
 async function main() {
-  const stdinBuffer = fs.readFileSync(0, 'utf-8');
+  let stdinBuffer: string;
+  try {
+    stdinBuffer = fs.readFileSync(0, 'utf-8');
+  } catch (e) {
+    console.error('Error reading stdin:', e);
+    process.exit(1);
+    return;
+  }
+
   if (!stdinBuffer) {
     process.exit(0);
+    return;
   }
 
   let inputData;
   try {
     inputData = JSON.parse(stdinBuffer);
   } catch (e) {
-    process.exit(0);
+    console.error('Error parsing JSON input:', e);
+    process.exit(1);
+    return;
   }
 
   const transcriptPath = inputData.transcript_path;
+  if (!transcriptPath) {
+    console.error('Missing transcript_path in input');
+    process.exit(1);
+    return;
+  }
+
   const messages = loadTranscript(transcriptPath);
 
   if (!messages || messages.length === 0) {
     process.exit(0);
+    return;
   }
 
   let playbook = loadPlaybook();
